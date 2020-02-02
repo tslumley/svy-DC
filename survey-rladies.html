@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="" xml:lang="">
+  <head>
+    <title>Survey analysis:</title>
+    <meta charset="utf-8" />
+    <meta name="author" content="Thomas Lumley  github/tslumley/svy-DC" />
+    <link href="libs/remark-css/default.css" rel="stylesheet" />
+    <link href="libs/remark-css/rladies.css" rel="stylesheet" />
+    <link href="libs/remark-css/rladies-fonts.css" rel="stylesheet" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, inverse, title-slide
+
+# Survey analysis:
+## beyond the subscripts
+### Thomas Lumley<br> github/tslumley/svy-DC
+### University of Auckland (and R-core)
+### 2020/6/2
+
+---
+
+
+
+
+class: inverse, center, middle
+
+# Why you should care
+
+---
+
+# Free Data!
+
+- Health:  NHANES, NHIS, CHIS
+- Employment: CPS
+- Attitudes: GSS, NLSY
+- Everything: ACS
+
+Or, you might be designing your own data collection
+
+---
+
+# Scary warnings
+
+&gt; NHANES uses a complex, multistage, probability sampling design. Researchers need to take this into account in their analyses by appropriately specifying the sampling design parameters. This module provides an overview of the sample design parameters in NHANES.
+
+&lt;br&gt;
+😰
+
+&gt; Due to the complex sampling design for the CPS, users of IPUMS-CPS data must make use of weights to produce representative statistics. The choice of weight depends on the particular sample being analyzed.  
+
+&lt;br&gt;
+😰😰
+
+&gt; Users  uncertain  about   the   appropriate   method   should   consult   an   econometrician,   statistician,   or   other   person   knowledgeable about the data before specifying the regression model. (NLSY)
+
+😰😰😰
+
+---
+
+&gt; Standard statistical software packages generally do not take into account four common characteristics of sample survey data: (1) unequal probability selection of observations, (2) clustering of observations, (3) stratification and (4) nonresponse and other adjustments. Point estimates of population parameters are impacted by the value of the analysis weight for each observation. These weights depend upon the selection probabilities and other survey design features such as stratification and clustering. Hence, **standard packages will yield biased point estimates** if the weights are ignored. Estimated variance formulas for point estimates based on sample survey data are impacted by clustering, stratification and the weights. By ignoring these aspects, **standard packages generally underestimate the estimated variance of a point estimate, sometimes substantially so.** (Brogan, D, 1998, in *Encyclopedia of Biostatistics*)
+
+
+😰😰😰😰
+
+---
+
+&lt;img src="./scary-math.png" height="550px"&gt;
+
+😰😰😰😰😰😰😰😰
+
+---
+
+class: inverse, center, middle
+
+
+# R to the rescue
+
+
+---
+R&lt;sup&gt;1&lt;/sup&gt; lets you do most of the analyses you're used to with complex survey data.
+
+You need to know three things
+
+1. Weights
+2. Clusters
+3. Strata
+
+.footnote[1: and Stata] 
+
+---
+
+# Weights
+
+A weight of 100 means *this observation represents 100 people in the population*
+
+- perhaps sampled with probability `\(1/100\)`
+- but also non-response adjustment
+- and frame corrections 
+- sometimes household size
+- maybe telephones per household
+- and calibration to Census data
+
+Sometimes we oversample (and have smaller weights) because a group is interesting; sometimes because they are inexpensive; sometimes it just happens.
+
+---
+
+# Clusters
+
+If you have to go visit people, it's easier to do it in groups
+
+- cities or counties
+- neighbourhoods
+- workplaces
+- schools
+- households
+
+You get less information per observation, but more information per hour or per dollar.
+
+---
+
+# Strata
+
+If you sample 1000 people from the US, you get
+
+- 10 **on average** from Iowa
+- 2 **on average** from DC
+
+You might fix these numbers, sample
+
+- exactly 10 from Iowa
+- exacty 2 from DC
+
+These are strata. 
+
+Stratified sampling makes the sample more representative of the population; increases information per observation.
+
+---
+
+# Multistage sampling
+
+Sample clusters within strata, with specified weights
+
+Within each cluster, sample subclusters within substrata with specified weights
+
+And so on. 
+
+If the sample is much smaller than the population, you can pretend you had just one stage of cluster/strata (but all the weights)
+
+Survey statistics calls this approximation **with replacement**, for boring maths reasons.
+
+Nearly all public-use data uses the with-replacement approximation. 
+
+---
+class: inverse, center, middle
+
+
+# The survey package in 1 slide
+
+---
+
+
+
+Put your data and metadata in a survey design object.
+
+
+```r
+data(nhanes)
+d_nhanes &lt;- svydesign(id=~SDMVPSU, strata=~SDMVSTRA, weights=~WTMEC2YR,
+           nest=TRUE,data=nhanes)
+```
+
+
+Use the survey design object where you'd normally use a data frame, in a function that probably has a `svy` prefix
+
+
+```r
+svymean(~HI_CHOL, design=d_nhanes, na.rm=TRUE)
+svyby(~HI_CHOL, ~agecat, svymean, design=d_nhanes, na.rm=TRUE)
+svyglm(HI_CHOL~race+agecat+RIAGENDR, design=d_nhanes, family=quasibinomial)
+```
+
+
+---
+class: inverse, center, middle
+
+# Data exploration
+
+---
+
+# Putting weights in graphics
+
+- boxplot: sample quartiles -&gt; estimated population quartiles
+- histogram: sample proportions -&gt; estimated population proportions
+- density: sum of kernels -&gt; weighted sum of kernels
+- scatterplots: ???
+
+---
+
+# Scatterplots
+
+- thinning: subsample the data to equal probability
+- alpha channel: opacity proportional to weight
+- hexbins: sample count -&gt; estimated population count
+
+`svyplot(,type="??")`
+
+- "bubble": don't do this
+- "hex": hexbins using hex size
+- "grayhex": hexbins using shading
+- "subsample": thinning
+- "transparent": partially transparent
+
+---
+
+# Sodium intake in NHANES 
+
+National Health and Nutrition Examination Survey
+
+- continuous health survey
+- samples about 15k people in each two-year wave
+- includes detailed medical exam, so few clusters
+- highly stratified sampling
+- public use data!
+- actually four-phase design, but public use files use 'with-replacement' approximation
+
+We will look at dietary sodium intake and blood pressure.
+
+---
+
+# Set up data
+
+
+```r
+library(foreign)
+
+demo&lt;-read.xport("demo_c.xpt")[,c(1:8,28:31)]
+bp&lt;-read.xport("bpx_c.xpt")
+bm&lt;-read.xport("bmx_c.xpt")[,c("SEQN","BMXBMI")]
+diet&lt;-read.xport("dr1tot_c.xpt")[,c(1:52,63,64)]
+
+nhanes34&lt;-merge(demo,bp,by="SEQN")
+nhanes34&lt;-merge(nhanes34,bm,by="SEQN")
+nhanes34&lt;-merge(nhanes34,diet,by="SEQN")
+
+demo5&lt;-read.xport("demo_d.xpt")[,c(1:8,39:42)]
+bp5&lt;-read.xport("bpx_x.xpt")
+bp5$BPXSAR&lt;-rowMeans(bp5[,c("BPXSY1","BPXSY2","BPXSY3","BPXSY4")],
+    na.rm=TRUE)
+bp5$BPXDAR&lt;-rowMeans(bp5[,c("BPXDI1","BPXDI2","BPXDI3","BPXDI4")],
+    na.rm=TRUE)
+bm5&lt;-read.xport("bmx_d.xpt")[,c("SEQN","BMXBMI")]
+diet5&lt;-read.xport("dr1tot_d.xpt")[,c(1:52,64,65)]
+
+nhanes56&lt;-merge(demo5,bp5,by="SEQN")
+nhanes56&lt;-merge(nhanes56,bm5,by="SEQN")
+nhanes56&lt;-merge(nhanes56,diet5,by="SEQN")
+
+nhanes&lt;-rbind(nhanes34,nhanes56)
+```
+
+---
+
+# Survey stuff
+
+### Weights
+
+We're using *dietary interview* data, need to use dietary interview weights `WTDRD1`
+
+Each wave has weights that rescale the two-year dietary interview sample to the US [civilian, non-institutionalised] population
+
+We have two waves: need to scale each weight down by half.
+
+
+
+```r
+nhanes$fouryearwt&lt;-nhanes$WTDRD1/2
+```
+
+People who aren't in the dietary interview sample don't exist. They are dead to us. 
+
+---
+
+# Survey stuff
+
+
+### Structure
+
+The documentation tells us the strata and cluster ('PSU') variables
+
+`nest=TRUE` tells R to just assume the clusters are properly nested in the strata and the cluster `1` in each stratum is different. 
+
+
+
+```r
+des&lt;-svydesign(id=~SDMVPSU,strat=~SDMVSTRA,weights=~fouryearwt,
+   nest=TRUE, data=subset(nhanes, !is.na(WTDRD1)))
+```
+
+---
+
+
+```r
+des
+```
+
+```
+## Stratified 1 - level Cluster Sampling design (with replacement)
+## With (60) clusters.
+## svydesign(id = ~SDMVPSU, strat = ~SDMVSTRA, weights = ~fouryearwt, 
+##     nest = TRUE, data = subset(nhanes, !is.na(WTDRD1)))
+```
+
+```r
+colnames(des)
+```
+
+```
+##  [1] "SEQN"       "SDDSRVYR"   "RIDSTATR"   "RIAGENDR"   "RIDAGEYR"  
+##  [6] "RIDAGEMN"   "RIDAGEEX"   "RIDRETH1"   "WTINT2YR"   "WTMEC2YR"  
+## [11] "SDMVPSU"    "SDMVSTRA"   "PEASCST1"   "PEASCTM1"   "PEASCCT1"  
+## [16] "BPXCHR"     "BPQ150A"    "BPQ150B"    "BPQ150C"    "BPQ150D"   
+## [21] "BPAARM"     "BPACSZ"     "BPXPLS"     "BPXDB"      "BPXPULS"   
+## [26] "BPXPTY"     "BPXML1"     "BPXSY1"     "BPXDI1"     "BPAEN1"    
+## [31] "BPXSY2"     "BPXDI2"     "BPAEN2"     "BPXSY3"     "BPXDI3"    
+## [36] "BPAEN3"     "BPXSY4"     "BPXDI4"     "BPAEN4"     "BPXSAR"    
+## [41] "BPXDAR"     "BMXBMI"     "WTDRD1"     "WTDR2D"     "DR1DRSTZ"  
+## [46] "DR1EXMER"   "DRABF"      "DRDINT"     "DR1DAY"     "DR1LANG"   
+## [51] "DR1MNRSP"   "DR1HELPD"   "DBQ095Z"    "DBD100"     "DRQSPREP"  
+## [56] "DRQSDIET"   "DRQSDT1"    "DRQSDT2"    "DRQSDT3"    "DRQSDT4"   
+## [61] "DRQSDT5"    "DRQSDT6"    "DRQSDT7"    "DRQSDT8"    "DRQSDT91"  
+## [66] "DR1TNUMF"   "DR1TKCAL"   "DR1TPROT"   "DR1TCARB"   "DR1TSUGR"  
+## [71] "DR1TFIBE"   "DR1TTFAT"   "DR1TSFAT"   "DR1TMFAT"   "DR1TPFAT"  
+## [76] "DR1TCHOL"   "DR1TATOC"   "DR1TATOA"   "DR1TRET"    "DR1TVARA"  
+## [81] "DR1TACAR"   "DR1TBCAR"   "DR1TCRYP"   "DR1TLYCO"   "DR1TLZ"    
+## [86] "DR1TVB1"    "DR1TVB2"    "DR1TNIAC"   "DR1TVB6"    "DR1TFOLA"  
+## [91] "DR1TFA"     "DR1TFF"     "DR1TFDFE"   "DR1TSODI"   "DR1TPOTA"  
+## [96] "fouryearwt"
+```
+
+
+
+---
+
+# Units
+
+Dietary sodium/potassium a are large numbers in mg/day.
+
+I want grams/day. Or moles, like normal countries use.
+
+
+```r
+des&lt;-update(des, sodium=DR1TSODI/1000, potassium=DR1TPOTA/1000)
+des&lt;-update(des, namol=sodium/23, kmol=potassium/39)
+```
+
+---
+
+## Summaries
+
+
+```r
+svymean(~sodium+potassium, des, na.rm=TRUE)
+```
+
+```
+##             mean     SE
+## sodium    3.3691 0.0280
+## potassium 2.5979 0.0245
+```
+
+```r
+svyquantile(~sodium+potassium, des, quantiles=c(0.25,0.5,0.75),na.rm=TRUE)
+```
+
+```
+##            0.25   0.5     0.75
+## sodium    2.115 3.069 4.243766
+## potassium 1.703 2.392 3.254000
+```
+
+```r
+svymean(~sodium, subset(des, RIAGENDR==1), na.rm=TRUE)
+```
+
+```
+##          mean     SE
+## sodium 3.8944 0.0373
+```
+
+---
+
+
+```r
+svyby(~sodium, ~RIDRETH1, svymean, design=des, na.rm=TRUE)
+```
+
+```
+##   RIDRETH1   sodium         se
+## 1        1 3.188710 0.05530042
+## 2        2 2.986853 0.08027165
+## 3        3 3.445924 0.03587407
+## 4        4 3.189214 0.04762457
+## 5        5 3.321049 0.08583119
+```
+
+---
+
+# Scatterplots
+
+
+```r
+svyplot(BPXDAR~RIDAGEYR,style="hex",design=des,legend=0,
+        xlab="Age (yrs)",ylab="Diastolic BP (mmHg)")
+```
+
+![](survey-rladies_files/figure-html/unnamed-chunk-11-1.png)&lt;!-- --&gt;
+
+---
+
+
+```r
+svyplot(BPXDAR~RIDAGEYR,style="trans",design=des,legend=0,
+        xlab="Age (yrs)",ylab="Diastolic BP (mmHg)", pch=19,alpha=c(0,0.3))
+```
+
+![](survey-rladies_files/figure-html/unnamed-chunk-12-1.png)&lt;!-- --&gt;
+
+---
+
+# Smoothers
+
+
+```r
+men&lt;-svysmooth(BPXDAR~RIDAGEYR,design=subset(des, RIAGENDR==1),bandwidth=10)
+women&lt;-svysmooth(BPXDAR~RIDAGEYR,design=subset(des, RIAGENDR==2),bandwidth=10)
+plot(men,ylim=c(40,80),ylab="Diastolic BP (mmHg)",xlab="Age (yrs)")
+lines(women,lty=2)
+legend("bottomright",lty=1:2,bty="n",legend=c("Men","Women"))
+```
+
+---
+
+![](survey-rladies_files/figure-html/unnamed-chunk-14-1.png)&lt;!-- --&gt;
+---
+
+
+```r
+median&lt;-svysmooth(BPXDAR~RIDAGEYR,design=des,method="quantreg",quantile=0.5)
+plot(median,ylim=c(30,90),ylab="Diastolic BP (mmHg)",xlab="Age (yrs)",lwd=2)
+for(qi in c(.25,.75)){
+	quartile &lt;- svysmooth(BPXDAR~RIDAGEYR,design=des,
+	                      method="quantreg",quantile=qi)
+	lines(quartile,lwd=1)
+}
+for(qi in c(.1,.9)){
+	decile &lt;- svysmooth(BPXDAR~RIDAGEYR,design=des,
+	                    method="quantreg",quantile=qi)
+	lines(decile,lwd=1,lty=3)
+}
+legend("bottomright",lty=c(1,1,3),lwd=c(2,1,1),bty="n",
+       legend=c("Median","Quartiles","10% and 90%"))
+```
+
+---
+
+
+![](survey-rladies_files/figure-html/unnamed-chunk-16-1.png)&lt;!-- --&gt;
+
+---
+
+# Regression: ISH
+
+We'll use **isolated systolic hypertension** as the outcome variable
+
+
+```r
+des&lt;-update(des, ish=(BPXSAR&gt;140) &amp; (BPXDAR&lt;90))
+```
+
+Also, linear splines in age, because linear is *obviously* not sound
+
+
+```r
+des&lt;-update(des, 
+            age1=pmin(RIDAGEYR,50)/10,
+            age2=pmin(pmax(RIDAGEYR,50),65)/10,
+            age3=pmin(pmax(RIDAGEYR,65),90)/10)
+```
+
+
+---
+
+## Sequence of models
+
+
+```r
+ish0s &lt;- svyglm(ish~age1+age2+age3, 
+  design=des, family=quasibinomial)	
+ish1s&lt;- svyglm(ish~age1+age2+age3+factor(RIDRETH1),
+  design=des,family=quasibinomial)	
+ish2s&lt;- svyglm(ish~age1+age2+age3+RIAGENDR+factor(RIDRETH1),
+  design=des, family=quasibinomial)	
+ish3s&lt;- svyglm(ish~(age1+age2+age3)*RIAGENDR+factor(RIDRETH1), 
+  design=des,family=quasibinomial)	
+ish4s&lt;- svyglm(ish~(age1+age2+age3)*RIAGENDR+factor(RIDRETH1)+sodium, 
+  design=des,family=quasibinomial)	
+```
+
+---
+
+
+```r
+anova(ish3s)
+```
+
+```
+## Anova table:  (Rao-Scott LRT)
+## svyglm(formula = ish ~ age1, design = des, family = quasibinomial)
+##                      stats      DEff        df ddf         p    
+## age1             1820.4005    6.1408    1.0000  29 &lt; 2.2e-16 ***
+## age2              462.2813    3.4693    1.0000  28 4.166e-12 ***
+## age3               40.0039    1.7249    1.0000  27 5.440e-05 ***
+## RIAGENDR           12.6366    1.6384    1.0000  26   0.01059 *  
+## factor(RIDRETH1)   30.8047    2.1703    4.0000  22   0.02800 *  
+## age1:RIAGENDR     110.5041    2.9146    1.0000  21 4.561e-06 ***
+## age2:RIAGENDR       1.5871    2.8334    1.0000  20   0.46210    
+## age3:RIAGENDR       0.7468    1.6674    1.0000  19   0.50951    
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+```
+
+---
+
+
+```r
+anova(ish3s,ish4s)
+```
+
+```
+## Working (Rao-Scott+F) LRT for sodium
+##  in svyglm(formula = ish ~ (age1 + age2 + age3) * RIAGENDR + factor(RIDRETH1) + 
+##     sodium, design = des, family = quasibinomial)
+## Working 2logLR =  0.7482066 p= 0.39902 
+## df=1;  denominator df= 18
+```
+
+No real evidence that sodium matters?
+
+Try some more variables
+
+
+```r
+ish5&lt;- svyglm(ish~(age1+age2+age3)*RIAGENDR+factor(RIDRETH1)+BMXBMI, 
+  design=des,family=quasibinomial)	
+ish6&lt;- svyglm(ish~(age1+age2+age3)*RIAGENDR+factor(RIDRETH1)+BMXBMI+sodium+potassium, 
+  design=des,family=quasibinomial)	
+anova(ish5, ish6)
+```
+
+```
+## Working (Rao-Scott+F) LRT for sodium potassium
+##  in svyglm(formula = ish ~ (age1 + age2 + age3) * RIAGENDR + factor(RIDRETH1) + 
+##     BMXBMI + sodium + potassium, design = des, family = quasibinomial)
+## Working 2logLR =  1.505635 p= 0.46569 
+## (scale factors:  1.4 0.62 );  denominator df= 16
+```
+
+---
+
+# Nonlinearity?
+
+
+```r
+library(splines)
+ish7&lt;- svyglm(ish~(age1+age2+age3)*RIAGENDR+factor(RIDRETH1)+BMXBMI+ns(sodium,3)+potassium, 
+  design=des,family=quasibinomial)	
+anova(ish5, ish7)
+```
+
+```
+## Working (Rao-Scott+F) LRT for ns(sodium, 3) potassium
+##  in svyglm(formula = ish ~ (age1 + age2 + age3) * RIAGENDR + factor(RIDRETH1) + 
+##     BMXBMI + ns(sodium, 3) + potassium, design = des, family = quasibinomial)
+## Working 2logLR =  5.378236 p= 0.28088 
+## (scale factors:  1.9 0.79 0.73 0.56 );  denominator df= 14
+```
+
+---
+
+# Continuous outcome
+
+
+```r
+sysbp&lt;- svyglm(BPXSAR~(age1+age2+age3)*RIAGENDR+factor(RIDRETH1)+BMXBMI, 
+  design=des)
+sysbp_sodium&lt;- svyglm(BPXSAR~(age1+age2+age3)*RIAGENDR+factor(RIDRETH1)+BMXBMI+sodium+potassium, 
+  design=des)	
+anova(sysbp, sysbp_sodium)  
+```
+
+```
+## Working (Rao-Scott+F) LRT for sodium potassium
+##  in svyglm(formula = BPXSAR ~ (age1 + age2 + age3) * RIAGENDR + factor(RIDRETH1) + 
+##     BMXBMI + sodium + potassium, design = des)
+## Working 2logLR =  12.53263 p= 0.011866 
+## (scale factors:  1.3 0.66 );  denominator df= 16
+```
+
+---
+
+
+```r
+coef(summary(sysbp_sodium))
+```
+
+```
+##                      Estimate  Std. Error    t value     Pr(&gt;|t|)
+## (Intercept)       116.8097161 11.10084650 10.5225954 1.345988e-08
+## age1                3.6083977  0.48489800  7.4415602 1.399511e-06
+## age2               -4.6559457  1.69526808 -2.7464362 1.433872e-02
+## age3                1.4125794  2.33057584  0.6061075 5.529459e-01
+## RIAGENDR          -60.4325610  7.25752800 -8.3268795 3.285723e-07
+## factor(RIDRETH1)2   0.4066314  1.32225042  0.3075298 7.624070e-01
+## factor(RIDRETH1)3  -0.4055510  0.62490182 -0.6489836 5.255558e-01
+## factor(RIDRETH1)4   3.1716349  0.64006450  4.9551801 1.432652e-04
+## factor(RIDRETH1)5   1.4484140  0.90467554  1.6010315 1.289267e-01
+## BMXBMI              0.4171254  0.04015294 10.3884130 1.612343e-08
+## sodium              0.3629780  0.15851769  2.2898268 3.595705e-02
+## potassium          -0.7409521  0.17089288 -4.3357690 5.111297e-04
+## age1:RIAGENDR       0.2239508  0.28565533  0.7839896 4.444983e-01
+## age2:RIAGENDR       6.6738476  1.13463416  5.8819378 2.317427e-05
+## age3:RIAGENDR       3.1239664  1.59087787  1.9636746 6.718831e-02
+```
+
+---
+
+## Ignoring survey design
+
+
+```r
+wrong_sodium&lt;-glm(BPXSAR~(age1+age2+age3)*RIAGENDR+factor(RIDRETH1)+BMXBMI+sodium+potassium, 
+  data=model.frame(des))	
+summary(coef(wrong_sodium)/coef(sysbp_sodium))
+```
+
+```
+##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+## -1.6392  0.6410  0.9691  0.8128  1.1020  3.1855
+```
+
+```r
+summary(SE(wrong_sodium)/SE(sysbp_sodium))
+```
+
+```
+##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+##  0.5116  0.5559  0.5765  0.6228  0.7236  0.7769
+```
+
+---
+
+# Other things we can do
+
+- `svyolr`: ordinal logistic regression and similar
+- `svykm`, `svycoxph`: survival analysis
+- `svyloglin`: loglinear models
+- `svyranktest`: design-based rank tests, *if you must*
+- `AIC`, `BIC`: for `svyglm` only, so far, design-based versions of AIC and BIC
+- `svrepdesign`: designs specificed by replicate weights
+- `as.svrepdesign`: creating replicate weights (cf bootstrap/jackknife)
+- `postStratify`, `rake`, `calibrate`: rescale weights to match known population information.
+
+---
+
+# Adding features
+
+**Ask**
+
+Ideally, with
+
+- a paper describing the estimator exactly
+- a test data set
+
+I can try to just invent things (AIC, BIC, rank tests), but it takes longer
+
+**Note**: mixed models are **hard** for non-obvious reasons. I'm working on `svylme` but it's not really done yet. 
+
+---
+
+# Where to find things
+
+- CRAN `survey`
+- http://r-forge.r-project.org/projects/r-survey/
+- `@tslumley`
+- github/tslumley/svylme
+- **github/tslumley/svy-DC**
+    </textarea>
+<style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "github",
+"highlightLines": true,
+"countIncrementalSlides": false
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function(d) {
+  var s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})(document);
+
+(function(d) {
+  var el = d.getElementsByClassName("remark-slides-area");
+  if (!el) return;
+  var slide, slides = slideshow.getSlides(), els = el[0].children;
+  for (var i = 1; i < slides.length; i++) {
+    slide = slides[i];
+    if (slide.properties.continued === "true" || slide.properties.count === "false") {
+      els[i - 1].className += ' has-continuation';
+    }
+  }
+  var s = d.createElement("style");
+  s.type = "text/css"; s.innerHTML = "@media print { .has-continuation { display: none; } }";
+  d.head.appendChild(s);
+})(document);
+// delete the temporary CSS (for displaying all slides initially) when the user
+// starts to view slides
+(function() {
+  var deleted = false;
+  slideshow.on('beforeShowSlide', function(slide) {
+    if (deleted) return;
+    var sheets = document.styleSheets, node;
+    for (var i = 0; i < sheets.length; i++) {
+      node = sheets[i].ownerNode;
+      if (node.dataset["target"] !== "print-only") continue;
+      node.parentNode.removeChild(node);
+    }
+    deleted = true;
+  });
+})();
+// adds .remark-code-has-line-highlighted class to <pre> parent elements
+// of code chunks containing highlighted lines with class .remark-code-line-highlighted
+(function(d) {
+  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
+  const preParents = [];
+  const findPreParent = function(line, p = 0) {
+    if (p > 1) return null; // traverse up no further than grandparent
+    const el = line.parentElement;
+    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
+  };
+
+  for (let line of hlines) {
+    let pre = findPreParent(line);
+    if (pre && !preParents.includes(pre)) preParents.push(pre);
+  }
+  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
+})(document);</script>
+
+<script>
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+</script>
+
+<script>
+slideshow._releaseMath = function(el) {
+  var i, text, code, codes = el.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+};
+slideshow._releaseMath(document);
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>
